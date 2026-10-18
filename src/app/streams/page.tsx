@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchStreams, type StreamState } from "@/lib/api";
+import { useWallet } from "@/contexts/wallet-context";
 
 const STROOPS = BigInt(10000000);
 
@@ -32,9 +33,41 @@ const STATUS_STYLES: Record<StreamState["status"], { label: string; className: s
   completed: { label: "Completed", className: "bg-zinc-700 text-zinc-300" },
 };
 
+type Message = { kind: "ok" | "error"; text: string; hash?: string };
+
 function StreamCard({ stream }: { stream: StreamState }) {
+  const { address, connect } = useWallet();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<Message | null>(null);
+
   const style = STATUS_STYLES[stream.status];
   const vestedPct = percent(stream.vested, stream.amount);
+  const canWithdraw = stream.status !== "completed" && BigInt(stream.available) > BigInt(0);
+
+  const onWithdraw = async () => {
+    setMessage(null);
+    if (!address) {
+      await connect();
+      return;
+    }
+    setBusy(true);
+    try {
+      const { withdrawStream } = await import("@/lib/contract");
+      const res = await withdrawStream(stream.streamId, address);
+      setMessage({
+        kind: "ok",
+        text: `Withdrew ${xlm(res.amount.toString())} XLM.`,
+        hash: res.hash,
+      });
+    } catch (err) {
+      setMessage({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Withdrawal failed.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
@@ -77,6 +110,33 @@ function StreamCard({ stream }: { stream: StreamState }) {
         </div>
       </dl>
 
+      {canWithdraw && (
+        <button
+          type="button"
+          onClick={onWithdraw}
+          disabled={busy}
+          className="mt-4 h-10 px-5 rounded-full bg-blue-500 text-white text-sm font-semibold hover:bg-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {busy ? "Waiting for wallet and network…" : address ? "Withdraw" : "Connect wallet to withdraw"}
+        </button>
+      )}
+
+      {message && (
+        <p className={`mt-3 text-sm ${message.kind === "ok" ? "text-green-300" : "text-red-400"}`}>
+          {message.text}{" "}
+          {message.hash && (
+            <a
+              href={`https://stellar.expert/explorer/testnet/tx/${message.hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-blue-400"
+            >
+              View transaction
+            </a>
+          )}
+        </p>
+      )}
+
       <div className="mt-4 flex items-center justify-between text-xs text-zinc-500">
         <span>Started {new Date(stream.startedAt).toLocaleString()}</span>
         <a
@@ -85,7 +145,7 @@ function StreamCard({ stream }: { stream: StreamState }) {
           rel="noopener noreferrer"
           className="text-blue-400 hover:underline"
         >
-          View transaction
+          View creation transaction
         </a>
       </div>
     </div>
