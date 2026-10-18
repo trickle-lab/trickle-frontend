@@ -1,54 +1,137 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchStreamEvents, type StreamEvent } from "@/lib/api";
+import { fetchStreams, type StreamState } from "@/lib/api";
 
-function formatAmount(raw?: string) {
-  if (!raw) return "—";
-  return (Number(raw) / 1e7).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 7,
-  });
+const STROOPS = BigInt(10000000);
+
+function xlm(raw: string): string {
+  const v = BigInt(raw);
+  const whole = v / STROOPS;
+  const frac = (v % STROOPS).toString().padStart(7, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
-function EventBadge({ type }: { type: string }) {
-  const colours: Record<string, string> = {
-    created: "bg-blue-500/20 text-blue-300",
-    withdraw: "bg-green-500/20 text-green-300",
-    cancelled: "bg-red-500/20 text-red-300",
-  };
+function percent(part: string, total: string): number {
+  const t = BigInt(total);
+  if (t <= BigInt(0)) return 0;
+  return Math.min(100, Number((BigInt(part) * BigInt(10000)) / t) / 100);
+}
+
+function formatDuration(seconds: string): string {
+  const s = Number(seconds);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  if (s < 86400) return `${(s / 3600).toFixed(1).replace(/\.0$/, "")} h`;
+  return `${(s / 86400).toFixed(1).replace(/\.0$/, "")} days`;
+}
+
+const STATUS_STYLES: Record<StreamState["status"], { label: string; className: string }> = {
+  active: { label: "Streaming", className: "bg-blue-500/20 text-blue-300" },
+  fully_vested: { label: "Fully vested", className: "bg-green-500/20 text-green-300" },
+  completed: { label: "Completed", className: "bg-zinc-700 text-zinc-300" },
+};
+
+function StreamCard({ stream }: { stream: StreamState }) {
+  const style = STATUS_STYLES[stream.status];
+  const vestedPct = percent(stream.vested, stream.amount);
+
   return (
-    <span
-      className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${colours[type] ?? "bg-zinc-700 text-zinc-300"}`}
-    >
-      {type}
-    </span>
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-white">Stream #{stream.streamId}</h2>
+        <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${style.className}`}>
+          {style.label}
+        </span>
+      </div>
+
+      <div className="flex items-end justify-between mb-2">
+        <span className="text-2xl font-semibold text-white">{xlm(stream.amount)} XLM</span>
+        <span className="text-sm text-zinc-400">over {formatDuration(stream.duration)}</span>
+      </div>
+
+      <div
+        className="h-2 rounded-full bg-zinc-800 overflow-hidden mb-2"
+        role="progressbar"
+        aria-valuenow={Math.round(vestedPct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Stream ${stream.streamId} vested`}
+      >
+        <div className="h-full bg-blue-500 transition-all" style={{ width: `${vestedPct}%` }} />
+      </div>
+      <p className="text-xs text-zinc-500 mb-4">{vestedPct.toFixed(1)}% vested</p>
+
+      <dl className="grid grid-cols-3 gap-3 text-sm">
+        <div>
+          <dt className="text-zinc-500 text-xs">Vested</dt>
+          <dd className="text-zinc-200">{xlm(stream.vested)}</dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500 text-xs">Withdrawn</dt>
+          <dd className="text-zinc-200">{xlm(stream.withdrawn)}</dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500 text-xs">Available now</dt>
+          <dd className="text-zinc-200">{xlm(stream.available)}</dd>
+        </div>
+      </dl>
+
+      <div className="mt-4 flex items-center justify-between text-xs text-zinc-500">
+        <span>Started {new Date(stream.startedAt).toLocaleString()}</span>
+        <a
+          href={`https://stellar.expert/explorer/testnet/tx/${stream.createdTxHash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:underline"
+        >
+          View transaction
+        </a>
+      </div>
+    </div>
   );
 }
 
 export default function StreamsPage() {
-  const [events, setEvents] = useState<StreamEvent[]>([]);
+  const [streams, setStreams] = useState<StreamState[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchStreamEvents()
-      .then(setEvents)
-      .catch(() => setError("Could not reach the Trickle indexer. Is the backend running?"))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    const load = () =>
+      fetchStreams()
+        .then((data) => {
+          if (cancelled) return;
+          setStreams(data);
+          setError(null);
+        })
+        .catch(() => {
+          if (!cancelled) setError("Could not reach the Trickle indexer. Is the backend running?");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+
+    load();
+    const timer = setInterval(load, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-12">
-      {/* Header */}
+    <div className="max-w-3xl mx-auto px-6 py-12">
       <div className="flex items-center justify-between mb-8">
         <div>
           <Link href="/" className="text-zinc-500 text-sm hover:text-zinc-300 mb-2 inline-block">
             ← Home
           </Link>
-          <h1 className="text-2xl font-semibold text-white">Stream activity</h1>
+          <h1 className="text-2xl font-semibold text-white">Streams</h1>
           <p className="text-zinc-400 text-sm mt-1">
-            Live events decoded from the Trickle contract on Stellar testnet.
+            Payment streams indexed from the Trickle contract on Stellar testnet.
           </p>
         </div>
         <Link
@@ -59,63 +142,31 @@ export default function StreamsPage() {
         </Link>
       </div>
 
-      {/* States */}
       {loading && (
-        <div className="space-y-3">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-16 rounded-xl bg-zinc-800 animate-pulse" />
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-44 rounded-xl bg-zinc-800 animate-pulse" />
           ))}
         </div>
       )}
 
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-300 text-sm">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-300 text-sm mb-4">
           {error}
         </div>
       )}
 
-      {!loading && !error && events.length === 0 && (
+      {!loading && !error && streams.length === 0 && (
         <div className="text-center py-20 text-zinc-500">
-          <p className="text-4xl mb-3">📡</p>
-          <p>No stream events yet. Create the first one!</p>
+          <p>No streams yet. Create the first one.</p>
         </div>
       )}
 
-      {/* Events table */}
-      {!loading && !error && events.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wide">
-              <tr>
-                <th className="px-4 py-3 text-left">Stream ID</th>
-                <th className="px-4 py-3 text-left">Event</th>
-                <th className="px-4 py-3 text-right">Amount (XLM)</th>
-                <th className="px-4 py-3 text-right">Duration (s)</th>
-                <th className="px-4 py-3 text-right">Ledger</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800">
-              {events.map((e) => (
-                <tr key={e.id} className="hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-zinc-300">{e.streamId}</td>
-                  <td className="px-4 py-3">
-                    <EventBadge type={e.type} />
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-300">
-                    {formatAmount(e.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-400">
-                    {e.duration ?? "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-500 font-mono text-xs">
-                    {e.ledger}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="space-y-4">
+        {streams.map((s) => (
+          <StreamCard key={s.streamId} stream={s} />
+        ))}
+      </div>
     </div>
   );
 }
