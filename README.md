@@ -7,11 +7,10 @@ Web app for [Trickle](https://github.com/trickle-lab/trickle-contract), a Stella
 - **Wallet connect** through [Stellar Wallets Kit](https://github.com/Creit-Tech/Stellar-Wallets-Kit) (Freighter and other Stellar wallets)
 - **Create a stream**: builds, simulates, signs and submits a real `create_stream` transaction to the Soroban contract on testnet, then links to the transaction on stellar.expert
 - **Streams dashboard**: one card per stream with status, vesting progress, withdrawn amount and amount available, refreshed every 10 seconds from [trickle-backend](https://github.com/trickle-lab/trickle-backend)
+- **Withdraw and cancel**: recipients claim vested funds, senders cancel a stream (the recipient keeps what has vested, the sender is refunded the rest). Each is a real signed transaction
 
 ## Roadmap (good first issues)
 
-- Withdraw button for recipients
-- Cancel button for senders (needs a `cancel` event in the contract)
 - Filter the dashboard to streams involving the connected wallet
 - Choose a token other than native XLM
 

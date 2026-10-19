@@ -31,43 +31,67 @@ const STATUS_STYLES: Record<StreamState["status"], { label: string; className: s
   active: { label: "Streaming", className: "bg-blue-500/20 text-blue-300" },
   fully_vested: { label: "Fully vested", className: "bg-green-500/20 text-green-300" },
   completed: { label: "Completed", className: "bg-zinc-700 text-zinc-300" },
+  cancelled: { label: "Cancelled", className: "bg-red-500/20 text-red-300" },
 };
 
 type Message = { kind: "ok" | "error"; text: string; hash?: string };
 
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-zinc-500 text-xs">{label}</dt>
+      <dd className="text-zinc-200">{value}</dd>
+    </div>
+  );
+}
+
 function StreamCard({ stream }: { stream: StreamState }) {
   const { address, connect } = useWallet();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"withdraw" | "cancel" | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
 
   const style = STATUS_STYLES[stream.status];
   const vestedPct = percent(stream.vested, stream.amount);
-  const canWithdraw = stream.status !== "completed" && BigInt(stream.available) > BigInt(0);
+  const isOpen = stream.status === "active" || stream.status === "fully_vested";
+  const canWithdraw = isOpen && BigInt(stream.available) > BigInt(0);
+  const canCancel = stream.status === "active";
 
-  const onWithdraw = async () => {
+  const run = async (action: "withdraw" | "cancel") => {
     setMessage(null);
     if (!address) {
       await connect();
       return;
     }
-    setBusy(true);
+    setBusy(action);
     try {
-      const { withdrawStream } = await import("@/lib/contract");
-      const res = await withdrawStream(stream.streamId, address);
-      setMessage({
-        kind: "ok",
-        text: `Withdrew ${xlm(res.amount.toString())} XLM.`,
-        hash: res.hash,
-      });
+      const contract = await import("@/lib/contract");
+      if (action === "withdraw") {
+        const res = await contract.withdrawStream(stream.streamId, address);
+        setMessage({
+          kind: "ok",
+          text: `Withdrew ${xlm(res.amount.toString())} XLM. This card updates once the indexer picks it up.`,
+          hash: res.hash,
+        });
+      } else {
+        const res = await contract.cancelStream(stream.streamId, address);
+        setMessage({
+          kind: "ok",
+          text: "Stream cancelled. This card updates once the indexer picks it up.",
+          hash: res.hash,
+        });
+      }
     } catch (err) {
       setMessage({
         kind: "error",
-        text: err instanceof Error ? err.message : "Withdrawal failed.",
+        text: err instanceof Error ? err.message : "The transaction failed.",
       });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+
+  const buttonClass =
+    "h-10 px-5 rounded-full text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors";
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
@@ -91,34 +115,60 @@ function StreamCard({ stream }: { stream: StreamState }) {
         aria-valuemax={100}
         aria-label={`Stream ${stream.streamId} vested`}
       >
-        <div className="h-full bg-blue-500 transition-all" style={{ width: `${vestedPct}%` }} />
+        <div
+          className={`h-full transition-all ${stream.status === "cancelled" ? "bg-red-500" : "bg-blue-500"}`}
+          style={{ width: `${vestedPct}%` }}
+        />
       </div>
-      <p className="text-xs text-zinc-500 mb-4">{vestedPct.toFixed(1)}% vested</p>
+      <p className="text-xs text-zinc-500 mb-4">
+        {stream.status === "cancelled"
+          ? `${vestedPct.toFixed(1)}% was paid out before the stream was cancelled`
+          : `${vestedPct.toFixed(1)}% vested`}
+      </p>
 
       <dl className="grid grid-cols-3 gap-3 text-sm">
-        <div>
-          <dt className="text-zinc-500 text-xs">Vested</dt>
-          <dd className="text-zinc-200">{xlm(stream.vested)}</dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 text-xs">Withdrawn</dt>
-          <dd className="text-zinc-200">{xlm(stream.withdrawn)}</dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 text-xs">Available now</dt>
-          <dd className="text-zinc-200">{xlm(stream.available)}</dd>
-        </div>
+        {stream.status === "cancelled" ? (
+          <>
+            <Stat label="Paid to recipient" value={`${xlm(stream.withdrawn)} XLM`} />
+            <Stat label="Refunded to sender" value={`${xlm(stream.refunded)} XLM`} />
+            <Stat label="Available now" value="0" />
+          </>
+        ) : (
+          <>
+            <Stat label="Vested" value={xlm(stream.vested)} />
+            <Stat label="Withdrawn" value={xlm(stream.withdrawn)} />
+            <Stat label="Available now" value={xlm(stream.available)} />
+          </>
+        )}
       </dl>
 
-      {canWithdraw && (
-        <button
-          type="button"
-          onClick={onWithdraw}
-          disabled={busy}
-          className="mt-4 h-10 px-5 rounded-full bg-blue-500 text-white text-sm font-semibold hover:bg-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {busy ? "Waiting for wallet and network…" : address ? "Withdraw" : "Connect wallet to withdraw"}
-        </button>
+      {(canWithdraw || canCancel) && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {canWithdraw && (
+            <button
+              type="button"
+              onClick={() => run("withdraw")}
+              disabled={busy !== null}
+              className={`${buttonClass} bg-blue-500 text-white hover:bg-blue-400`}
+            >
+              {busy === "withdraw"
+                ? "Waiting for wallet and network…"
+                : address
+                  ? "Withdraw"
+                  : "Connect wallet to withdraw"}
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              onClick={() => run("cancel")}
+              disabled={busy !== null}
+              className={`${buttonClass} border border-red-500/50 text-red-300 hover:bg-red-500/10`}
+            >
+              {busy === "cancel" ? "Waiting for wallet and network…" : "Cancel stream"}
+            </button>
+          )}
+        </div>
       )}
 
       {message && (

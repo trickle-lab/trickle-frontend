@@ -24,7 +24,8 @@ export interface StreamState {
   withdrawn: string;
   vested: string;
   available: string;
-  status: "active" | "fully_vested" | "completed";
+  status: "active" | "fully_vested" | "completed" | "cancelled";
+  refunded: string;
   eventCount: number;
   createdTxHash: string;
 }
