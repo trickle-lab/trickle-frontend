@@ -9,6 +9,12 @@ Web app for [Trickle](https://github.com/trickle-lab/trickle-contract), a Stella
 - **Streams dashboard**: one card per stream with status, vesting progress, withdrawn amount and amount available, refreshed every 10 seconds from [trickle-backend](https://github.com/trickle-lab/trickle-backend)
 - **Withdraw and cancel**: recipients claim vested funds, senders cancel a stream (the recipient keeps what has vested, the sender is refunded the rest). Each is a real signed transaction
 
+![Streams dashboard](docs/screenshots/05-dashboard-active.png)
+
+![A cancelled stream](docs/screenshots/09-dashboard-cancelled.png)
+
+See the [step-by-step walkthrough](docs/walkthrough.md) for the full create, withdraw and cancel flow.
+
 ## Roadmap (good first issues)
 
 - Filter the dashboard to streams involving the connected wallet
