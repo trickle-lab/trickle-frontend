@@ -27,6 +27,8 @@ Next.js 16, React 19, TypeScript, Tailwind CSS 4, `@stellar/stellar-sdk`, `@crei
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for more.
 
+![Trickle architecture](docs/architecture.png)
+
 ## Part of Trickle
 
 - [trickle-contract](https://github.com/trickle-lab/trickle-contract)
